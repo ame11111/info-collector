@@ -17,7 +17,10 @@
         .list{padding:120px 16px 100px;min-height:100vh}
         .empty{text-align:center;padding:60px 20px;color:#8E8E93}
         .empty i{font-size:48px;display:block;margin-bottom:12px;font-style:normal}
-        .card{background:#fff;border-radius:12px;padding:14px 16px;margin-bottom:10px;box-shadow:0 1px 3px rgba(0,0,0,.05);cursor:pointer}
+        .card-wrap{position:relative;overflow:hidden;border-radius:12px;margin-bottom:10px}
+        .card-delete{position:absolute;top:0;right:0;bottom:0;width:80px;background:#FF3B30;color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:500;cursor:pointer}
+        .card{position:relative;background:#fff;border-radius:12px;padding:14px 16px;box-shadow:0 1px 3px rgba(0,0,0,.05);cursor:pointer;transition:transform .2s ease;z-index:1}
+        .card.swiping{transition:none}
         .card:active{transform:scale(.98)}
         .card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
         .card-cat{font-size:12px;padding:2px 8px;border-radius:8px;background:rgba(0,122,255,.1);color:#007AFF;font-weight:500}
@@ -181,7 +184,7 @@
     function cardHtml(item){
         var body=item.content||'';
         if(item.type==='link'&&item.title)body=item.title+' - '+item.content;
-        return'<div class="card" data-id="'+item.id+'"><div class="card-top"><span class="card-cat">'+item.category+'</span><span class="card-src">'+(item.source||'')+'</span></div><div class="card-body">'+body+'</div><div class="card-bottom"><span>'+(icons[item.type]||'📄')+'</span><span>'+fmt(item.createdAt)+'</span></div></div>';
+        return'<div class="card-wrap" data-id="'+item.id+'"><div class="card-delete">删除</div><div class="card"><div class="card-top"><span class="card-cat">'+item.category+'</span><span class="card-src">'+(item.source||'')+'</span></div><div class="card-body">'+body+'</div><div class="card-bottom"><span>'+(icons[item.type]||'📄')+'</span><span>'+fmt(item.createdAt)+'</span></div></div></div>';
     }
 
     function render(){
@@ -193,10 +196,115 @@
         }else{
             el.innerHTML=arr.map(cardHtml).join('');
         }
+        bindSwipe();
     }
     render();
 
     function showToast(m){var t=document.getElementById('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2000);}
+
+    // ===== 滑动删除 =====
+    function bindSwipe(){
+        var wraps=document.querySelectorAll('.card-wrap');
+        wraps.forEach(function(wrap){
+            var card=wrap.querySelector('.card');
+            var deleteBtn=wrap.querySelector('.card-delete');
+            var startX=0,currentX=0,isDragging=false,isOpen=false;
+
+            card.addEventListener('touchstart',function(e){
+                startX=e.touches[0].clientX;
+                currentX=0;
+                isDragging=true;
+                card.classList.add('swiping');
+            },{passive:true});
+
+            card.addEventListener('touchmove',function(e){
+                if(!isDragging)return;
+                var diff=e.touches[0].clientX-startX;
+                if(isOpen){
+                    diff=diff-80;
+                }
+                if(diff>0)diff=0;
+                if(diff<-80)diff=-80;
+                currentX=diff;
+                card.style.transform='translateX('+currentX+'px)';
+            },{passive:true});
+
+            card.addEventListener('touchend',function(){
+                isDragging=false;
+                card.classList.remove('swiping');
+                if(currentX<-40){
+                    card.style.transform='translateX(-80px)';
+                    isOpen=true;
+                }else{
+                    card.style.transform='translateX(0)';
+                    isOpen=false;
+                }
+            });
+
+            // 鼠标支持（PC端测试）
+            card.addEventListener('mousedown',function(e){
+                startX=e.clientX;
+                currentX=0;
+                isDragging=true;
+                card.classList.add('swiping');
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove',function(e){
+                if(!isDragging)return;
+                var diff=e.clientX-startX;
+                if(isOpen){
+                    diff=diff-80;
+                }
+                if(diff>0)diff=0;
+                if(diff<-80)diff=-80;
+                currentX=diff;
+                card.style.transform='translateX('+currentX+'px)';
+            });
+
+            document.addEventListener('mouseup',function(){
+                if(!isDragging)return;
+                isDragging=false;
+                card.classList.remove('swiping');
+                if(currentX<-40){
+                    card.style.transform='translateX(-80px)';
+                    isOpen=true;
+                }else{
+                    card.style.transform='translateX(0)';
+                    isOpen=false;
+                }
+            });
+
+            // 点击删除按钮
+            deleteBtn.addEventListener('click',function(){
+                var id=parseInt(wrap.dataset.id);
+                wrap.style.transition='all .3s';
+                wrap.style.transform='translateX(-100%)';
+                wrap.style.opacity='0';
+                wrap.style.maxHeight=wrap.offsetHeight+'px';
+                setTimeout(function(){
+                    wrap.style.maxHeight='0';
+                    wrap.style.marginBottom='0';
+                    wrap.style.padding='0';
+                },50);
+                setTimeout(function(){
+                    items=items.filter(function(i){return i.id!==id;});
+                    save();
+                    showToast('已删除');
+                    render();
+                },350);
+            });
+
+            // 点击卡片（非滑动时）打开详情
+            card.addEventListener('click',function(){
+                if(isOpen){
+                    card.style.transform='translateX(0)';
+                    isOpen=false;
+                    return;
+                }
+            });
+        });
+    }
 
     // 标签筛选
     document.getElementById('tabs').addEventListener('click',function(e){
@@ -294,11 +402,17 @@
         render();
     });
 
-    // 点击卡片看详情
+    // 点击卡片看详情（事件委托）
     document.getElementById('list').addEventListener('click',function(e){
-        var card=e.target.closest('.card');
-        if(!card)return;
-        var id=parseInt(card.dataset.id);
+        // 如果点的是删除按钮，不触发详情
+        if(e.target.closest('.card-delete'))return;
+        var wrap=e.target.closest('.card-wrap');
+        if(!wrap)return;
+        var card=wrap.querySelector('.card');
+        // 如果卡片处于滑开状态，点击收回而不是打开详情
+        var transform=card.style.transform;
+        if(transform&&transform.indexOf('-80')!==-1)return;
+        var id=parseInt(wrap.dataset.id);
         var item=items.find(function(i){return i.id===id;});
         if(!item)return;
         detailId=id;
@@ -319,7 +433,7 @@
         document.body.style.overflow='';
     });
 
-    // 删除
+    // 详情页删除
     document.getElementById('detailDel').addEventListener('click',function(){
         if(!detailId)return;
         if(!confirm('确定删除？'))return;
@@ -361,9 +475,10 @@
     });
 
     document.getElementById('searchResults').addEventListener('click',function(e){
-        var card=e.target.closest('.card');
-        if(!card)return;
-        var id=parseInt(card.dataset.id);
+        if(e.target.closest('.card-delete'))return;
+        var wrap=e.target.closest('.card-wrap');
+        if(!wrap)return;
+        var id=parseInt(wrap.dataset.id);
         var item=items.find(function(i){return i.id===id;});
         if(!item)return;
         document.getElementById('searchModal').classList.remove('open');
